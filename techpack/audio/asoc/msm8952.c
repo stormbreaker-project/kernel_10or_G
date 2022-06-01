@@ -87,9 +87,15 @@ static struct wcd_mbhc_config mbhc_cfg = {
 	.swap_gnd_mic = NULL,
 	.hs_ext_micbias = false,
 	.key_code[0] = KEY_MEDIA,
+#ifdef CONFIG_MACH_TENOR_G
+	.key_code[1] = KEY_VOLUMEUP,
+	.key_code[2] = KEY_VOLUMEDOWN,
+	.key_code[3] = 0,
+#else
 	.key_code[1] = KEY_VOICECOMMAND,
 	.key_code[2] = KEY_VOLUMEUP,
 	.key_code[3] = KEY_VOLUMEDOWN,
+#endif
 	.key_code[4] = 0,
 	.key_code[5] = 0,
 	.key_code[6] = 0,
@@ -311,6 +317,9 @@ int is_ext_spk_gpio_support(struct platform_device *pdev,
 			struct msm_asoc_mach_data *pdata)
 {
 	const char *spk_ext_pa = "qcom,msm-spk-ext-pa";
+#ifdef CONFIG_MACH_TENOR_G
+	const char *spk_ext_pa1 = "qcom,msm-spk-ext-pa1";
+#endif
 
 	pr_debug("%s:Enter\n", __func__);
 
@@ -326,7 +335,34 @@ int is_ext_spk_gpio_support(struct platform_device *pdev,
 				__func__, pdata->spk_ext_pa_gpio);
 			return -EINVAL;
 		}
+#ifdef CONFIG_MACH_TENOR_G
+		else
+		{
+			pr_err("%s: enable speaker 1 gpio: %d",
+				__func__, pdata->spk_ext_pa_gpio);
+		}
+#endif
 	}
+#ifdef CONFIG_MACH_TENOR_G
+	pdata->spk_ext_pa1_gpio = of_get_named_gpio(pdev->dev.of_node,
+				spk_ext_pa1, 0);
+	if (pdata->spk_ext_pa1_gpio < 0) {
+		dev_dbg(&pdev->dev,"%s: missing %s in dt node\n", __func__, spk_ext_pa1);
+	} else {
+		if (!gpio_is_valid(pdata->spk_ext_pa1_gpio)) {
+			pr_err("%s: Invalid external speaker 1 gpio: %d",
+				__func__, pdata->spk_ext_pa1_gpio);
+			return -EINVAL;
+		}
+		else
+		{
+			pr_err("%s: enable speaker pa2 gpio: %d",
+				__func__, pdata->spk_ext_pa1_gpio);
+		}
+	}
+	gpio_direction_output(pdata->spk_ext_pa_gpio, 0);
+	gpio_direction_output(pdata->spk_ext_pa1_gpio, 0);
+#endif
 	return 0;
 }
 
@@ -334,7 +370,11 @@ static int enable_spk_ext_pa(struct snd_soc_codec *codec, int enable)
 {
 	struct snd_soc_card *card = codec->component.card;
 	struct msm_asoc_mach_data *pdata = snd_soc_card_get_drvdata(card);
+#ifdef CONFIG_MACH_TENOR_G
+	int pa_mode = EXT_PA_MODE;
+#else
 	int ret;
+#endif
 
 	if (!gpio_is_valid(pdata->spk_ext_pa_gpio)) {
 		pr_err("%s: Invalid gpio: %d\n", __func__,
@@ -342,10 +382,30 @@ static int enable_spk_ext_pa(struct snd_soc_codec *codec, int enable)
 		return false;
 	}
 
+#ifdef CONFIG_MACH_TENOR_G
+	if (!gpio_is_valid(pdata->spk_ext_pa1_gpio)) {
+		pr_err("%s: Invalid gpio1: %d\n", __func__,
+			pdata->spk_ext_pa1_gpio);
+		return false;
+	}
+#endif
 	pr_debug("%s: %s external speaker PA\n", __func__,
 		enable ? "Enable" : "Disable");
 
 	if (enable) {
+#ifdef CONFIG_MACH_TENOR_G
+		while (pa_mode > 0) {
+			gpio_set_value_cansleep(pdata->spk_ext_pa_gpio, 0);
+			udelay(2);
+			gpio_set_value_cansleep(pdata->spk_ext_pa_gpio, enable);
+			udelay(2);
+			gpio_set_value_cansleep(pdata->spk_ext_pa1_gpio, 0);
+			udelay(2);
+			gpio_set_value_cansleep(pdata->spk_ext_pa1_gpio, enable);
+			udelay(2);
+			pa_mode--;
+		}
+#else
 		ret =  msm_cdc_pinctrl_select_active_state(
 					pdata->spk_ext_pa_gpio_p);
 		if (ret) {
@@ -354,8 +414,15 @@ static int enable_spk_ext_pa(struct snd_soc_codec *codec, int enable)
 			return ret;
 		}
 		gpio_set_value_cansleep(pdata->spk_ext_pa_gpio, enable);
+#endif
 	} else {
 		gpio_set_value_cansleep(pdata->spk_ext_pa_gpio, enable);
+#ifdef CONFIG_MACH_TENOR_G
+		gpio_set_value_cansleep(pdata->spk_ext_pa1_gpio, enable);
+#endif
+#ifdef CONFIG_MACH_TENOR_G
+	pr_err("%s: gpio set skipped %s\n", __func__, "ext_spk_gpio");
+#else
 		ret = msm_cdc_pinctrl_select_sleep_state(
 				pdata->spk_ext_pa_gpio_p);
 		if (ret) {
@@ -363,6 +430,7 @@ static int enable_spk_ext_pa(struct snd_soc_codec *codec, int enable)
 					__func__, "ext_spk_gpio");
 			return ret;
 		}
+#endif
 	}
 	return 0;
 }
@@ -1517,7 +1585,11 @@ static void *def_msm8952_wcd_mbhc_cal(void)
 		return NULL;
 
 #define S(X, Y) ((WCD_MBHC_CAL_PLUG_TYPE_PTR(msm8952_wcd_cal)->X) = (Y))
+#ifdef CONFIG_MACH_TENOR_G
+	S(v_hs_max, 1700);
+#else
 	S(v_hs_max, 1500);
+#endif
 #undef S
 #define S(X, Y) ((WCD_MBHC_CAL_BTN_DET_PTR(msm8952_wcd_cal)->X) = (Y))
 	S(num_btn, WCD_MBHC_DEF_BUTTONS);
@@ -1540,6 +1612,18 @@ static void *def_msm8952_wcd_mbhc_cal(void)
 	 * 210-290 == Button 2
 	 * 360-680 == Button 3
 	 */
+#ifdef CONFIG_MACH_TENOR_G
+	btn_low[0] = 80;
+	btn_high[0] = 80;
+	btn_low[1] = 220;
+	btn_high[1] = 220;
+	btn_low[2] = 350;
+	btn_high[2] = 450;
+	btn_low[3] = 350;
+	btn_high[3] = 450;
+	btn_low[4] = 350;
+	btn_high[4] = 450;
+#else
 	btn_low[0] = 75;
 	btn_high[0] = 75;
 	btn_low[1] = 150;
@@ -1550,6 +1634,7 @@ static void *def_msm8952_wcd_mbhc_cal(void)
 	btn_high[3] = 450;
 	btn_low[4] = 500;
 	btn_high[4] = 500;
+#endif
 
 	return msm8952_wcd_cal;
 }
@@ -1584,6 +1669,7 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_ignore_suspend(dapm, "DMIC2");
 	snd_soc_dapm_ignore_suspend(dapm, "WSA_SPK OUT");
 	snd_soc_dapm_ignore_suspend(dapm, "LINEOUT");
+	snd_soc_dapm_ignore_suspend(dapm, "Ext Spk");
 
 	snd_soc_dapm_sync(dapm);
 
@@ -3217,7 +3303,7 @@ parse_mclk_freq:
 	}
 
 	pdata->spk_ext_pa_gpio_p = of_parse_phandle(pdev->dev.of_node,
-							spk_ext_pa, 0);
+							"qcom,cdc-ext-pa-gpios", 0);
 
 	ret = is_us_eu_switch_gpio_support(pdev, pdata);
 	if (ret < 0) {
